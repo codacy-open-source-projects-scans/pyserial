@@ -1,12 +1,12 @@
-=================================
- pySerial  |build-status| |docs|
-=================================
+=================
+ pySerial  |docs|
+=================
 
 Overview
 ========
 This module encapsulates the access for the serial port. It provides backends
-for Python_ running on Windows, OSX, Linux, BSD (possibly any POSIX compliant
-system) and IronPython. The module named "serial" automatically selects the
+for Python_ running on Windows, OSX, Linux, and BSD (possibly any POSIX compliant
+system). The module named "serial" automatically selects the
 appropriate backend.
 
 - Project Homepage: https://github.com/pyserial/pyserial
@@ -33,7 +33,6 @@ Installation
 
 Detailed information can be found in `documentation/pyserial.rst`_.
 
-The usual setup.py for Python_ libraries is used for the source distribution.
 Windows installers are also available (see download link above).
 
 or
@@ -48,9 +47,6 @@ conda builds are available for linux, mac and windows.
 .. _examples: https://github.com/pyserial/pyserial/blob/master/examples
 .. _Python: http://python.org/
 .. _Sphinx: http://sphinx-doc.org/
-.. |build-status| image:: https://travis-ci.org/pyserial/pyserial.svg?branch=master
-   :target: https://travis-ci.org/pyserial/pyserial
-   :alt: Build status
 .. |docs| image:: https://readthedocs.org/projects/pyserial/badge/?version=latest
    :target: http://pyserial.readthedocs.io/
    :alt: Documentation
