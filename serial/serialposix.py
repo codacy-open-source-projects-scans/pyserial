@@ -63,7 +63,7 @@ class PlatformSpecificBase(object):
             fcntl.ioctl(self.fd, TIOCSBRK)
         else:
             fcntl.ioctl(self.fd, TIOCCBRK)
-    
+
 
 # some systems support an extra flag to enable the two in POSIX unsupported
 # parity settings for MARK and SPACE
@@ -85,11 +85,17 @@ if plat[:5] == 'linux':    # Linux (confirmed)  # noqa
         TCGETS2 = 0x4030542A
         TCSETS2 = 0x8030542B
         BAUDRATE_OFFSET = 10
+        BOTHER = 0o010000
+    elif platform.machine().lower().startswith("ppc"):
+        TCGETS2 = 0x403c7413
+        TCSETS2 = 0x803c7414
+        BAUDRATE_OFFSET = 13
+        BOTHER = 0x0000001f
     else:
         TCGETS2 = 0x802C542A
         TCSETS2 = 0x402C542B
         BAUDRATE_OFFSET = 9
-    BOTHER = 0o010000
+        BOTHER = 0o010000
 
     # RS485 ioctls
     TIOCGRS485 = 0x542E
@@ -258,7 +264,7 @@ elif plat[:3] == 'bsd' or \
         TIOCSBRK = 0x2000747B # _IO('t', 123)
         TIOCCBRK = 0x2000747A # _IO('t', 122)
 
-        
+
         def _update_break_state(self):
             """\
             Set break: Controls TXD. When active, no transmitting is possible.
@@ -825,20 +831,19 @@ class PosixPollSerial(Serial):
         poll.register(self.pipe_abort_read_r, select.POLLIN | select.POLLERR | select.POLLHUP | select.POLLNVAL)
         if size > 0:
             while len(read) < size:
-                # print "\tread(): size",size, "have", len(read)    #debug
                 # wait until device becomes ready to read (or something fails)
+                abort = False
                 for fd, event in poll.poll(None if timeout.is_infinite else (timeout.time_left() * 1000)):
                     if fd == self.pipe_abort_read_r:
+                        os.read(fd, 1000)
+                        abort = True
                         break
                     if event & (select.POLLERR | select.POLLHUP | select.POLLNVAL):
                         raise SerialException('device reports error (poll)')
-                    #  we don't care if it is select.POLLIN or timeout, that's
-                    #  handled below
-                if fd == self.pipe_abort_read_r:
-                    os.read(self.pipe_abort_read_r, 1000)
+                    buf = os.read(fd, size - len(read))
+                    read.extend(buf)
+                if abort:
                     break
-                buf = os.read(self.fd, size - len(read))
-                read.extend(buf)
                 if timeout.expired() \
                         or (self._inter_byte_timeout is not None and self._inter_byte_timeout > 0) and not buf:
                     break   # early abort on timeout
