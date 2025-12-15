@@ -434,15 +434,8 @@ class Serial(SerialBase, PlatformSpecific):
                 ispeed = ospeed = self.BAUDRATE_CONSTANTS[self._baudrate]
             except KeyError:
                 #~ raise ValueError('Invalid baud rate: %r' % self._baudrate)
-
-                # See if BOTHER is defined for this platform; if it is, use
-                # this for a speed not defined in the baudrate constants list.
-                try:
-                    ispeed = ospeed = BOTHER
-                except NameError:
-                    # may need custom baud rate, it isn't in our list.
-                    ispeed = ospeed = getattr(termios, 'B38400')
-
+                # Use safe placeholder for tcsetattr(), try to set special baudrate later
+                ispeed = ospeed = termios.B38400
                 try:
                     custom_baud = int(self._baudrate)  # store for later
                 except ValueError:
@@ -587,13 +580,13 @@ class Serial(SerialBase, PlatformSpecific):
             except OSError as e:
                 # this is for Python 3.x where select.error is a subclass of
                 # OSError ignore BlockingIOErrors and EINTR. other errors are shown
-                # https://www.python.org/dev/peps/pep-0475.
+                # https://peps.python.org/pep-0475/.
                 if e.errno not in (errno.EAGAIN, errno.EALREADY, errno.EWOULDBLOCK, errno.EINPROGRESS, errno.EINTR):
                     raise SerialException(e.errno, f'read failed: {e}')
             except select.error as e:
                 # this is for Python 2.x
                 # ignore BlockingIOErrors and EINTR. all errors are shown
-                # see also http://www.python.org/dev/peps/pep-3151/#select
+                # see also https://peps.python.org/pep-3151/#select
                 if e[0] not in (errno.EAGAIN, errno.EALREADY, errno.EWOULDBLOCK, errno.EINPROGRESS, errno.EINTR):
                     raise SerialException('read failed: {}'.format(e))
             else:
@@ -661,13 +654,13 @@ class Serial(SerialBase, PlatformSpecific):
             except OSError as e:
                 # this is for Python 3.x where select.error is a subclass of
                 # OSError ignore BlockingIOErrors and EINTR. other errors are shown
-                # https://www.python.org/dev/peps/pep-0475.
+                # https://peps.python.org/pep-0475/.
                 if e.errno not in (errno.EAGAIN, errno.EALREADY, errno.EWOULDBLOCK, errno.EINPROGRESS, errno.EINTR):
                     raise SerialException(e.errno, f'write failed: {e}')
             except select.error as e:
                 # this is for Python 2.x
                 # ignore BlockingIOErrors and EINTR. all errors are shown
-                # see also http://www.python.org/dev/peps/pep-3151/#select
+                # see also https://peps.python.org/pep-3151/#select
                 if e[0] not in (errno.EAGAIN, errno.EALREADY, errno.EWOULDBLOCK, errno.EINPROGRESS, errno.EINTR):
                     raise SerialException('write failed: {}'.format(e))
             if not timeout.is_non_blocking and timeout.expired():
@@ -678,9 +671,42 @@ class Serial(SerialBase, PlatformSpecific):
         """\
         Flush of file like objects. In this case, wait until all data
         is written.
+
+        On macOS where the serial device corresponds to a PTY, the underlying
+        call to termios.tcdrain() can block indefinitely because it waits for
+        data to be read from the other end, which may never happen. So, for
+        PTYs, we skip tcdrain() since data is already in the kernel buffer
+        after write().
         """
         if not self.is_open:
             raise PortNotOpenError()
+
+        # On macOS, tcdrain() can block indefinitely on PTY devices.
+        # See: https://github.com/pyserial/pyserial/issues/625
+        #      https://github.com/python/cpython/issues/97001
+        if sys.platform.startswith('darwin'):
+            try:
+                dev_name = os.ttyname(self.fd)
+                # macOS PTY slave devices are /dev/ttys*
+                # BSD-style PTY devices are /dev/pty[pqrs]*
+                pty_device_names = (
+                    '/dev/ttys',
+                    '/dev/ptyp',
+                    '/dev/ptyq',
+                    '/dev/ptyr',
+                    '/dev/ptys',
+                )
+                if dev_name.startswith(pty_device_names):
+                    # For PTY devices on macOS, tcdrain() blocks indefinitely
+                    # because it waits for data to be read from the other end,
+                    # which may never happen. Since the data is already in the
+                    # kernel buffer after write(), we consider flush() complete.
+                    return
+            except OSError:
+                # If we can't determine the device name, fall back to tcdrain.
+                # This is safe because real serial ports won't fail ttyname().
+                pass
+
         while True:
             try:
                 termios.tcdrain(self.fd)
@@ -688,6 +714,10 @@ class Serial(SerialBase, PlatformSpecific):
             except termios.error as e:
                 if e.args[0] == errno.EINTR:
                     continue
+                if e.args[0] == errno.ENOTTY:
+                    # The device is not a TTY.
+                    # This can happen on Cygwin pseudo TTYs, for example.
+                    break
                 raise
 
     def _reset_input_buffer(self):
